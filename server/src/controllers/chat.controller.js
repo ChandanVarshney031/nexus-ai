@@ -6,13 +6,40 @@ import { getAssistantChatPrompt } from '../services/ai/prompt.service.js';
 
 export const getConversations = async (req, res, next) => {
   try {
-    const conversations = await Conversation.find({ user: req.user._id })
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 15));
+    const search = (req.query.search || req.query.q || '').trim();
+
+    const query = { user: req.user._id };
+
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { 'messages.content': { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const total = await Conversation.countDocuments(query);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const skip = (page - 1) * limit;
+
+    const conversations = await Conversation.find(query)
       .select('title createdAt updatedAt messages')
-      .sort({ updatedAt: -1 });
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     res.json({
       success: true,
       data: conversations,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
     });
   } catch (error) {
     next(error);
@@ -113,9 +140,49 @@ Feel free to ask follow-up questions regarding salary expectations, interview pr
   }
 };
 
+export const renameConversation = async (req, res, next) => {
+  try {
+    const { title } = req.body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Conversation title is required',
+      });
+    }
+
+    const conversation = await Conversation.findOneAndUpdate(
+      { _id: req.params.id, user: req.user._id },
+      { title: title.trim() },
+      { new: true }
+    );
+
+    if (!conversation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Conversation not found or unauthorized',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Conversation renamed successfully',
+      data: conversation,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const deleteConversation = async (req, res, next) => {
   try {
-    await Conversation.findOneAndDelete({ _id: req.params.id, user: req.user._id });
+    const conversation = await Conversation.findOneAndDelete({ _id: req.params.id, user: req.user._id });
+    if (!conversation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Conversation not found or unauthorized',
+      });
+    }
+
     res.json({
       success: true,
       message: 'Conversation deleted',
@@ -124,3 +191,4 @@ export const deleteConversation = async (req, res, next) => {
     next(error);
   }
 };
+
