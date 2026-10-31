@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Conversation } from '../models/Conversation.js';
 import { Activity } from '../models/Activity.js';
 import { buildUserAIContext } from '../services/ai/context.service.js';
@@ -13,9 +14,10 @@ export const getConversations = async (req, res, next) => {
     const query = { user: req.user._id };
 
     if (search) {
+      const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { 'messages.content': { $regex: search, $options: 'i' } },
+        { title: { $regex: escapedSearch, $options: 'i' } },
+        { 'messages.content': { $regex: escapedSearch, $options: 'i' } },
       ];
     }
 
@@ -72,7 +74,7 @@ export const sendMessage = async (req, res, next) => {
     }
 
     let conversation;
-    if (conversationId) {
+    if (conversationId && mongoose.Types.ObjectId.isValid(conversationId)) {
       conversation = await Conversation.findOne({ _id: conversationId, user: req.user._id });
     }
 
@@ -150,6 +152,13 @@ export const renameConversation = async (req, res, next) => {
       });
     }
 
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Conversation not found or unauthorized',
+      });
+    }
+
     const conversation = await Conversation.findOneAndUpdate(
       { _id: req.params.id, user: req.user._id },
       { title: title.trim() },
@@ -175,6 +184,13 @@ export const renameConversation = async (req, res, next) => {
 
 export const deleteConversation = async (req, res, next) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Conversation not found or unauthorized',
+      });
+    }
+
     const conversation = await Conversation.findOneAndDelete({ _id: req.params.id, user: req.user._id });
     if (!conversation) {
       return res.status(404).json({
@@ -191,4 +207,3 @@ export const deleteConversation = async (req, res, next) => {
     next(error);
   }
 };
-

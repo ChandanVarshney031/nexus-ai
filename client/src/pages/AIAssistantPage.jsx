@@ -62,6 +62,7 @@ export const AIAssistantPage = () => {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const messagesEndRef = useRef(null);
+  const isFirstRender = useRef(true);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -86,6 +87,10 @@ export const AIAssistantPage = () => {
   }, [messages, loading]);
 
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
     const timer = setTimeout(() => {
       setPage(1);
       fetchConversations(searchQuery, 1);
@@ -144,6 +149,7 @@ export const AIAssistantPage = () => {
     setLoading(true);
 
     try {
+      const isNew = !activeConversation;
       const payload = {
         conversationId: activeConversation?._id || null,
         content: text,
@@ -155,8 +161,14 @@ export const AIAssistantPage = () => {
         setActiveConversation(conversation);
         setMessages(conversation.messages);
 
-        // Refresh thread list
-        fetchConversations(searchQuery, page);
+        // Refresh thread list: if this is a newly created conversation, reset to page 1 to show it
+        if (isNew) {
+          setPage(1);
+          setSearchQuery('');
+          fetchConversations('', 1);
+        } else {
+          fetchConversations(searchQuery, page);
+        }
       }
     } catch (err) {
       console.error('Failed to send chat message:', err.message);
@@ -188,15 +200,23 @@ export const AIAssistantPage = () => {
 
   const handleSaveRename = async (id, e) => {
     if (e) e.stopPropagation();
-    if (!editingTitle.trim()) return;
+    const trimmed = editingTitle.trim();
+    if (!trimmed) return;
+
+    const currentConv = conversations.find((c) => c._id === id);
+    if (currentConv && currentConv.title === trimmed) {
+      setEditingId(null);
+      setEditingTitle('');
+      return;
+    }
 
     setIsRenaming(true);
     try {
       const res = await API.patch(`/chat/conversations/${id}`, {
-        title: editingTitle.trim(),
+        title: trimmed,
       });
       if (res.data.success) {
-        const updatedTitle = res.data.data?.title || editingTitle.trim();
+        const updatedTitle = res.data.data?.title || trimmed;
         setConversations((prev) =>
           prev.map((c) => (c._id === id ? { ...c, title: updatedTitle } : c))
         );
@@ -224,9 +244,10 @@ export const AIAssistantPage = () => {
     setIsDeleting(true);
     try {
       await API.delete(`/chat/conversations/${conversationToDelete._id}`);
-      const updated = conversations.filter((c) => c._id !== conversationToDelete._id);
+      const deletedId = conversationToDelete._id;
+      const updated = conversations.filter((c) => c._id !== deletedId);
       setConversations(updated);
-      if (activeConversation?._id === conversationToDelete._id) {
+      if (activeConversation?._id === deletedId) {
         if (updated.length > 0) {
           selectConversation(updated[0]);
         } else {
@@ -235,7 +256,13 @@ export const AIAssistantPage = () => {
       }
       setIsDeleteModalOpen(false);
       setConversationToDelete(null);
-      fetchConversations(searchQuery, page);
+
+      // If last item on current page was deleted and page > 1, go to previous page
+      const targetPage = updated.length === 0 && page > 1 ? page - 1 : page;
+      if (targetPage !== page) {
+        setPage(targetPage);
+      }
+      fetchConversations(searchQuery, targetPage);
     } catch (err) {
       console.error('Delete conversation error:', err.message);
     } finally {
